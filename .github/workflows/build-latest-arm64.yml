@@ -1,0 +1,84 @@
+name: Build latest arm64-v8a APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/build-latest-arm64.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout latest master
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Build release APKs
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Locate arm64-v8a APK
+        id: apk
+        shell: bash
+        run: |
+          APK="$(find app/build/outputs/apk/release -type f -name '*arm64-v8a*.apk' | head -n 1)"
+          if [ -z "$APK" ]; then
+            echo "arm64-v8a APK not found"
+            find app/build/outputs/apk/release -type f -print || true
+            exit 1
+          fi
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "Found: $APK"
+
+      - name: Generate self-signing key
+        run: |
+          keytool -genkeypair \
+            -keystore selfbuild.jks \
+            -storepass android \
+            -keypass android \
+            -alias selfbuild \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=BiliDownOut Self Build,O=Self Build,C=CN"
+
+      - name: Sign arm64-v8a APK
+        shell: bash
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "apksigner not found"
+            exit 1
+          fi
+
+          "$APKSIGNER" sign \
+            --ks selfbuild.jks \
+            --ks-key-alias selfbuild \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out BiliDownOut-latest-arm64-v8a.apk \
+            "${{ steps.apk.outputs.path }}"
+
+          "$APKSIGNER" verify --verbose --print-certs BiliDownOut-latest-arm64-v8a.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BiliDownOut-latest-arm64-v8a
+          path: BiliDownOut-latest-arm64-v8a.apk
+          if-no-files-found: error
+          retention-days: 7
