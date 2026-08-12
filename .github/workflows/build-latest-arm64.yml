@@ -1,4 +1,5 @@
 name: Build latest arm64-v8a APK
+# Triggered build workflow for latest master.
 
 on:
   workflow_dispatch:
